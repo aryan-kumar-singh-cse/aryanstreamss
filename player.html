@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -166,13 +166,7 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        async function pickProxyEndpoint() {
-            if (location.protocol === "file:") return "http://localhost:3000/proxy";
-
-            var candidates = [];
-            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
-                candidates.push("http://localhost:3000/proxy");
-            }
+        async function pickProxyEndpoint() { return "/proxy"; }
             if (location.pathname.indexOf("/fancode/") !== -1) {
                 candidates.push("/proxy", "/proxy");
             } else {
