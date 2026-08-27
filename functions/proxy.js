@@ -61,7 +61,16 @@ export async function onRequest(context) {
       // Rewrite manifest so all segment/key URLs go through this proxy
       let text = await response.text();
       const finalUrl = response.url || targetUrl;
-      const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
+      // Use URL object so we only look at the path — the query string may contain
+      // slashes (e.g. in ?acl=/path/to/dir/*) that would corrupt lastIndexOf("/")
+      let baseUrl;
+      try {
+        const u = new URL(finalUrl);
+        const pathDir = u.pathname.substring(0, u.pathname.lastIndexOf("/") + 1);
+        baseUrl = u.origin + pathDir;
+      } catch (_) {
+        baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
+      }
       const proxyBase = url.origin + url.pathname;
 
       text = text.replace(/^(?!#)(\S+)$/gm, (match) => {
