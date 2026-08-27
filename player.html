@@ -71,7 +71,7 @@
         }
         .q-item:hover { background:rgba(255,255,255,0.08); color:#fff; }
         .q-item.active { color:#fff; background:rgba(255,255,255,0.08); }
-        .q-item.active::after { content:'âœ“'; font-size:13px; margin-left:6px; }
+        .q-item.active::after { content:'✓'; font-size:13px; margin-left:6px; }
 
         /* Center flash */
         .center-flash { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:15; pointer-events:none; opacity:0; transition:opacity 0.2s; }
@@ -93,7 +93,7 @@
 </head>
 <body>
     <div id="loading"><div class="spinner"></div></div>
-    <a href="index.html" id="back-btn">â† Back</a>
+    <a href="index.html" id="back-btn">← Back</a>
 
     <div class="player-shell">
         <div id="video-area" class="video-area">
@@ -166,7 +166,13 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        async function pickProxyEndpoint() { return "/proxy"; }
+        async function pickProxyEndpoint() {
+            if (location.protocol === "file:") return "http://localhost:3000/proxy";
+
+            var candidates = [];
+            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+                candidates.push("http://localhost:3000/proxy");
+            }
             if (location.pathname.indexOf("/fancode/") !== -1) {
                 candidates.push("/proxy", "/proxy");
             } else {
@@ -212,10 +218,10 @@
                 console.error("HLS Error:", data);
                 if (data.fatal) {
                     if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                        showError("Network error (" + errDetail + errStatus + ") â€“ retrying...");
+                        showError("Network error (" + errDetail + errStatus + ") – retrying...");
                         hlsInstance.startLoad();
                     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        showError("Media error (" + errDetail + ") â€“ recovering...");
+                        showError("Media error (" + errDetail + ") – recovering...");
                         hlsInstance.recoverMediaError();
                     } else {
                         showError("Stream failed (" + errDetail + errStatus + ")");
@@ -335,4 +341,3 @@
     </script>
 </body>
 </html>
-
