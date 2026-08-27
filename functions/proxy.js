@@ -18,49 +18,78 @@ export async function onRequest(context) {
     return new Response("Missing url parameter", { status: 400, headers: corsHeaders });
   }
 
+  // Build upstream headers — inject correct Referer/Origin based on target CDN
+  const upstreamHeaders = {
+    "User-Agent": request.headers.get("User-Agent") ||
+      "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    "Accept": "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+  };
+
+  // FanCode CDN (Akamai hdntl-authenticated streams)
+  if (
+    targetUrl.includes("fancode.com") ||
+    targetUrl.includes("aiv-cdn.net") ||
+    targetUrl.includes("aiv-cdn.com") ||
+    targetUrl.includes("in-mc-flive") ||
+    targetUrl.includes("akamaized.net") ||
+    targetUrl.includes("akamaihd.net")
+  ) {
+    upstreamHeaders["Referer"] = "https://fancode.com/";
+    upstreamHeaders["Origin"] = "https://fancode.com";
+  }
+
+  // Forward Range header for segment byte-range requests
+  const range = request.headers.get("Range");
+  if (range) upstreamHeaders["Range"] = range;
+
   try {
     const response = await fetch(targetUrl, {
       method: "GET",
-      headers: {
-        "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0",
-        "Accept": "*/*",
-      },
+      headers: upstreamHeaders,
       redirect: "follow",
     });
 
     const contentType = response.headers.get("content-type") || "";
-    const isM3U8 = contentType.includes("mpegurl") || targetUrl.includes(".m3u8");
+    const isM3U8 =
+      contentType.includes("mpegurl") ||
+      contentType.includes("x-mpegurl") ||
+      targetUrl.includes(".m3u8");
 
     let body;
     if (isM3U8) {
-      // Rewrite relative URLs in manifests to go through the proxy
+      // Rewrite manifest so all segment/key URLs go through this proxy
       let text = await response.text();
-      const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf("/") + 1);
+      const finalUrl = response.url || targetUrl;
+      const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf("/") + 1);
       const proxyBase = url.origin + url.pathname;
 
       text = text.replace(/^(?!#)(\S+)$/gm, (match) => {
-        // Trim any carriage return (\r) and whitespace from the matched line
         const trimmed = match.trim();
         if (!trimmed) return match;
-
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-          // Absolute URL — wrap in proxy
-          return proxyBase + "?url=" + encodeURIComponent(trimmed);
-        } else {
-          // Relative URL — resolve against base, then wrap in proxy
-          return proxyBase + "?url=" + encodeURIComponent(baseUrl + trimmed);
-        }
+        const absolute = trimmed.startsWith("http://") || trimmed.startsWith("https://")
+          ? trimmed
+          : baseUrl + trimmed;
+        return proxyBase + "?url=" + encodeURIComponent(absolute);
       });
+
+      // Also rewrite URI= attributes (e.g. EXT-X-KEY)
+      text = text.replace(/URI="([^"]+)"/g, (_m, uri) => {
+        const absolute = uri.startsWith("http://") || uri.startsWith("https://")
+          ? uri
+          : baseUrl + uri;
+        return `URI="${proxyBase}?url=${encodeURIComponent(absolute)}"`;
+      });
+
       body = text;
     } else {
       body = response.body;
     }
 
     const responseHeaders = new Headers();
-    // Copy safe headers
     for (const [k, v] of response.headers.entries()) {
       const kl = k.toLowerCase();
-      if (kl !== "access-control-allow-origin" && kl !== "x-frame-options") {
+      if (kl !== "access-control-allow-origin" && kl !== "x-frame-options" && kl !== "content-security-policy") {
         responseHeaders.set(k, v);
       }
     }
