@@ -1,0 +1,18 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Opening Player...</title>
+    <script>
+        location.replace("/player" + location.search + location.hash);
+    </script>
+</head>
+<body>
+    <a id="fallback" href="/player">Open player</a>
+    <script>
+        document.getElementById("fallback").href = "/player" + location.search + location.hash;
+    </script>
+</body>
+</html>
+

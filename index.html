@@ -1,0 +1,621 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>FanCode Live | Stream Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top left, rgba(239, 68, 68, 0.15), transparent 30rem),
+                radial-gradient(circle at bottom right, rgba(99, 102, 241, 0.12), transparent 30rem),
+                #090d16;
+            color: #f8fafc;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+        }
+
+        .glass-nav {
+            background: rgba(9, 13, 22, 0.76);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+        }
+
+        .match-card {
+            background: rgba(15, 23, 42, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(12px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .match-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(239, 68, 68, 0.3);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #090d16; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #ef4444; }
+
+        body.modal-open { overflow: hidden; }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            background-color: #000;
+            outline: none;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="min-h-screen pb-10">
+        <!-- Navigation -->
+        <nav class="glass-nav sticky top-0 z-40 w-full">
+            <div class="mx-auto max-w-7xl px-4 sm:px-6 py-4 flex justify-between items-center gap-4">
+                <div class="flex items-center gap-3 min-w-0">
+                    <div class="grid place-items-center w-10 h-10 rounded-lg bg-red-600 shadow-lg shadow-red-950/40">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M8 5v14l11-7z"/>
+                        </svg>
+                    </div>
+                    <div class="min-w-0">
+                        <h1 class="text-xl sm:text-2xl font-black tracking-wide text-white uppercase truncate">
+                            Fancode<span class="text-red-500"> Live</span>
+                        </h1>
+                        <p class="text-xs text-slate-400 truncate">Auto-updating live sports hub</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-3">
+                    <div class="flex items-center gap-2 text-xs font-semibold text-slate-300 bg-slate-900/70 px-3 py-2 rounded-lg border border-slate-700/70">
+                        <span class="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                        <span id="live-count">0</span> LIVE
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <main class="mx-auto max-w-7xl px-4 sm:px-6 mt-6 sm:mt-8">
+            <!-- Filter Categories -->
+            <div id="filters" class="flex flex-wrap gap-2 mb-6 sm:mb-8">
+                <button class="filter-btn bg-red-600 text-white px-4 py-1.5 rounded-full text-sm font-bold transition">All</button>
+            </div>
+
+            <!-- Loader -->
+            <div id="loader" class="flex flex-col items-center justify-center py-32">
+                <div class="w-12 h-12 border-4 border-slate-700 border-t-red-500 rounded-full animate-spin mb-4"></div>
+                <p class="text-slate-400 font-medium tracking-wide">Fetching live matches...</p>
+            </div>
+
+            <!-- Match Grid Sections -->
+            <div id="live-section" class="mb-10 hidden">
+                <h2 class="text-2xl font-black text-white mb-5 flex items-center gap-3">
+                    <span class="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse"></span>
+                    Live Matches
+                </h2>
+                <div id="live-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"></div>
+            </div>
+
+            <div id="upcoming-section" class="hidden">
+                <h2 class="text-2xl font-black text-slate-300 mb-5 flex items-center gap-3">
+                    <span class="w-2.5 h-2.5 bg-slate-500 rounded-full"></span>
+                    Upcoming Events
+                </h2>
+                <div id="upcoming-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"></div>
+            </div>
+        </main>
+
+        <!-- Video Player Modal -->
+        <div id="player-modal" class="fixed inset-0 bg-black/95 hidden z-50 flex-col items-center justify-center p-2 sm:p-5 backdrop-blur-md">
+            <div class="w-full max-w-5xl relative flex flex-col gap-3">
+                <div class="flex items-center justify-between gap-3 rounded-lg border border-slate-800 bg-slate-950/80 px-3 sm:px-4 py-3">
+                    <div class="min-w-0">
+                        <div class="flex items-center gap-2">
+                            <span class="inline-flex items-center gap-2 text-white font-bold text-xs bg-red-600 px-2 py-1 rounded">
+                                <span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>LIVE
+                            </span>
+                            <span id="player-event" class="text-xs text-slate-400 truncate"></span>
+                        </div>
+                        <h2 id="player-title" class="mt-2 text-base sm:text-lg font-semibold text-slate-100 truncate"></h2>
+                    </div>
+
+                    <div class="flex items-center gap-2 shrink-0">
+                        <button type="button" id="btn-share-match" class="border border-indigo-700 hover:border-indigo-500 text-indigo-400 hover:text-indigo-200 rounded-lg px-3 sm:px-4 py-2 transition-all flex items-center gap-2 font-medium text-sm bg-indigo-950/40">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 10.742l4.636-2.318M8.684 13.258l4.636 2.318m6-4.576a3 3 0 11-6 0 3 3 0 016 0zm-6-5.736a3 3 0 11-6 0 3 3 0 016 0zm0 11.472a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                            Share Link
+                        </button>
+                        <button type="button" id="close-player" onclick="closePlayer()" class="border border-slate-700 hover:border-white hover:text-white text-slate-300 rounded-lg px-3 sm:px-4 py-2 transition-all flex items-center gap-2 font-medium text-sm bg-slate-900/60">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                            Close
+                        </button>
+                    </div>
+                </div>
+
+                <div class="w-full bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800 relative" style="aspect-ratio: 16 / 9;">
+                    <video id="native-video" controls autoplay playsinline referrerpolicy="no-referrer"></video>
+                    <div id="player-message" class="hidden absolute inset-0 items-center justify-center bg-black/80 text-center px-6 text-sm text-slate-300"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quality Modal -->
+        <div id="quality-modal" class="fixed inset-0 bg-black/90 hidden z-[60] items-center justify-center p-4 backdrop-blur-sm">
+            <div class="w-full max-w-[340px] rounded-xl bg-[#131722] border border-[#2d313f] shadow-2xl overflow-hidden flex flex-col">
+                <div class="p-4 bg-[#0d1017] text-center border-b border-[#2d313f] flex items-center justify-center gap-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                    </svg>
+                    <h3 class="text-lg font-black text-white">Select Stream Quality</h3>
+                </div>
+                <div class="p-5 flex flex-col gap-3" id="quality-list"></div>
+                <div class="p-4 text-center border-t border-[#2d313f] bg-[#0d1017]">
+                    <button onclick="closeModal()" class="text-sm font-semibold text-slate-400 hover:text-white transition">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Telegram Modal -->
+        <div id="telegram-modal" class="fixed inset-0 bg-black/90 hidden z-[70] items-center justify-center p-4 backdrop-blur-sm">
+            <div class="w-full max-w-[340px] rounded-xl bg-[#131722] border border-[#2d313f] shadow-2xl overflow-hidden flex flex-col text-center">
+                <div class="p-6">
+                    <div class="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-[#2AABEE] shadow-lg shadow-[#2AABEE]/20">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-white" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M21.944 4.667a1.45 1.45 0 0 0-1.63-.252L3.41 11.07c-.94.37-.91 1.71.047 2.038l4.253 1.456 1.626 5.081c.292.913 1.46 1.18 2.12.486l2.44-2.565 4.364 3.176c.827.602 2.006.129 2.205-.876l2.284-13.608a1.45 1.45 0 0 0-.805-1.591ZM8.18 13.29l8.307-5.113c.385-.237.781.283.452.594l-6.86 6.49-.268 2.793-1.03-3.224a1.25 1.25 0 0 0-.601-1.54Z"/>
+                        </svg>
+                    </div>
+                    <h3 class="text-2xl font-black text-white mb-2">Join Our Telegram</h3>
+                    <p class="text-sm text-slate-400 mb-6">Get latest match updates, backup links, and stream notifications!</p>
+                    
+                    <div class="flex flex-col gap-3">
+                        <a href="https://t.me/aurastreams" target="_blank" rel="noreferrer" class="w-full bg-[#2AABEE] hover:bg-[#2298D6] text-white py-3 rounded-lg text-sm font-bold transition shadow-md">
+                            Join Channel
+                        </a>
+                        <button id="btn-continue-stream" class="w-full bg-transparent border border-[#334155] hover:border-white text-slate-300 hover:text-white py-3 rounded-lg text-sm font-bold transition">
+                            Continue to Stream
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script>
+    (function() {
+        const API = "https://raw.githubusercontent.com/drmlive/fancode-live-events/main/fancode.json";
+        const FALLBACK_IMG = "https://www.fancode.com/skillup-uploads/cms-media/Cricket_Fallback_Old_match-card.jpg";
+        let allMatches = [], currentFilter = "ALL", currentMatch = null, currentQuality = null;
+        let selectedStreamUrl = "", hlsInstance = null;
+
+        function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+        function dedup(arr) {
+            const seen = new Set();
+            return arr.filter(m => { 
+                const k = m.match_id + "_" + (m.language || ""); 
+                if(seen.has(k)) return false; 
+                seen.add(k); 
+                return true; 
+            });
+        }
+
+        let proxyEndpoint = "/proxy";
+        async function pickProxyEndpoint() {
+            if (location.protocol === "file:") return "http://localhost:3000/proxy";
+
+            var candidates = [];
+            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+                candidates.push("http://localhost:3000/proxy");
+            }
+            if (location.pathname.indexOf("/fancode/") !== -1) {
+                candidates.push("/proxy", "/proxy");
+            } else {
+                candidates.push("/proxy", "/proxy");
+            }
+            for (var i = 0; i < candidates.length; i++) {
+                try {
+                    var res = await fetch(candidates[i], { method: "GET", cache: "no-store" });
+                    var text = await res.clone().text().catch(function(){ return ""; });
+                    if (res.status === 400 && /missing/i.test(text)) return candidates[i];
+                } catch (e) {}
+            }
+            return location.pathname.indexOf("/fancode/") !== -1 ? "/proxy" : "/proxy";
+        }
+        pickProxyEndpoint().then(function(endpoint) {
+            proxyEndpoint = endpoint;
+        }).catch(function() {});
+
+        function decodeHex(hex) {
+            if (!hex) return "";
+            let str = "";
+            for (let i = 0; i < hex.length; i += 2) {
+                str += String.fromCharCode(parseInt(hex.substr(i, 2), 16));
+            }
+            return str;
+        }
+
+        // Parsing M3U8 string inside auto_streams
+        function parseQualities(m) {
+            const hexData = m.google_m3u8_hex || m.m3u8_hex || m.hex || "";
+            if (hexData) {
+                const text = decodeHex(hexData);
+                const lines = text.split("\n");
+                const qualities = [];
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes("RESOLUTION=")) {
+                        const resPart = lines[i].split("RESOLUTION=")[1].split(",")[0];
+                        const height = resPart.split("x")[1];
+                        const streamUrl = (lines[i+1] || "").trim();
+                        if (streamUrl && streamUrl.startsWith("http")) {
+                            qualities.push({ res: height + "p", url: streamUrl, isHd: parseInt(height) >= 720 });
+                        }
+                    }
+                }
+                if (qualities.length > 0) return qualities;
+            }
+
+            if (m.adfree_url) {
+                return [{ res: "Adfree", url: m.adfree_url }];
+            }
+            if (m.dai_url) {
+                return [{ res: "DAI", url: m.dai_url }];
+            }
+
+            const cdn = m.STREAMING_CDN || {};
+            const autoStreams = m.auto_streams;
+
+            if (cdn.is_drm && cdn.drm && cdn.drm.clearkey) {
+                const [kid, key] = cdn.drm.clearkey.split(":");
+                const url = cdn.Primary_Playback_URL || "";
+                return [{ 
+                    res: "DRM Stream", 
+                    url: "shaka_player.html?mpd=" + encodeURIComponent(url) + "&kid=" + encodeURIComponent(kid) + "&key=" + encodeURIComponent(key), 
+                    isDrm: true 
+                }];
+            }
+
+            if (autoStreams && autoStreams.length > 0 && autoStreams[0].auto) {
+                const text = autoStreams[0].auto;
+                const lines = text.split("\n");
+                const qualities = [];
+                for (let i = 0; i < lines.length; i++) {
+                    if (lines[i].includes("RESOLUTION=")) {
+                        const resPart = lines[i].split("RESOLUTION=")[1].split(",")[0];
+                        const height = resPart.split("x")[1];
+                        const streamUrl = (lines[i+1] || "").trim();
+                        if (streamUrl && streamUrl.startsWith("http")) {
+                            qualities.push({ res: height + "p", url: streamUrl, isHd: parseInt(height) >= 720 });
+                        }
+                    }
+                }
+                return qualities;
+            }
+
+            const fallbackUrl = cdn.Primary_Playback_URL || m.stream_url;
+            if (fallbackUrl) {
+                return [{ res: "Auto", url: fallbackUrl }];
+            }
+            return [];
+        }
+
+        window.openQuality = function(index, title, event) {
+            const m = allMatches[index];
+            currentMatch = m; // Track current match
+            const qualities = parseQualities(m);
+            const list = document.getElementById("quality-list");
+            list.innerHTML = "";
+
+            if (qualities.length === 0) { alert("Stream not currently available"); return; }
+
+            // Store details for player modal header
+            document.getElementById("player-title").textContent = title;
+            document.getElementById("player-event").textContent = event || m.event_name;
+
+            // If only 1 quality level (like DRM or static fallback)
+            if (qualities.length === 1) {
+                handleQualitySelect(qualities[0]);
+                return;
+            }
+
+            qualities.forEach(q => {
+                const btn = document.createElement("button");
+                btn.className = "w-full bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 hover:border-red-500 text-white py-3 rounded-lg text-sm font-bold flex justify-between px-4 transition duration-200";
+                const isHd = q.isHd || parseInt(q.res) >= 720;
+                btn.innerHTML = '<span>ðŸ“º ' + esc(q.res) + '</span>' + (isHd ? '<span class="bg-red-600 px-2 py-0.5 rounded text-[10px] font-black text-white">HD</span>' : '');
+                btn.onclick = () => handleQualitySelect(q);
+                list.appendChild(btn);
+            });
+
+            document.getElementById("quality-modal").classList.remove("hidden");
+            document.getElementById("quality-modal").classList.add("flex");
+        };
+
+        window.closeModal = function() {
+            document.getElementById("quality-modal").classList.add("hidden");
+            document.getElementById("quality-modal").classList.remove("flex");
+
+            // Clear URL parameters
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete("id");
+            newUrl.searchParams.delete("r");
+            window.history.replaceState(null, "", newUrl.toString());
+            currentMatch = null;
+            currentQuality = null;
+        };
+
+        function handleQualitySelect(q) {
+            document.getElementById("quality-modal").classList.add("hidden");
+            document.getElementById("quality-modal").classList.remove("flex");
+            currentQuality = q; // Track quality
+
+            // Update URL parameters
+            if (currentMatch) {
+                const newUrl = new URL(window.location.href);
+                newUrl.searchParams.set("id", currentMatch.match_id);
+                newUrl.searchParams.set("r", q.res.replace("p", ""));
+                window.history.replaceState(null, "", newUrl.toString());
+            }
+
+            if (q.isDrm) {
+                // Redirect directly for DRM protected streams
+                window.location.href = q.url;
+            } else {
+                // Route stream through our Cloudflare Function CORS proxy
+                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
+                showTelegramModal();
+            }
+        }
+
+        function showTelegramModal() {
+            document.getElementById("telegram-modal").classList.remove("hidden");
+            document.getElementById("telegram-modal").classList.add("flex");
+        }
+
+        function closeTelegramModal() {
+            document.getElementById("telegram-modal").classList.add("hidden");
+            document.getElementById("telegram-modal").classList.remove("flex");
+        }
+
+        document.getElementById("btn-continue-stream").onclick = function() {
+            closeTelegramModal();
+            launchPlayer(selectedStreamUrl);
+        };
+
+        function launchPlayer(url) {
+            const video = document.getElementById("native-video");
+            const modal = document.getElementById("player-modal");
+            const msg = document.getElementById("player-message");
+
+            modal.classList.remove("hidden");
+            modal.classList.add("flex");
+            document.body.classList.add("modal-open");
+
+            msg.classList.add("hidden");
+
+            if (Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    xhrSetup: function(xhr) { xhr.withCredentials = false; }
+                });
+                hlsInstance.loadSource(url);
+                hlsInstance.attachMedia(video);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.play().catch(() => {});
+                });
+                hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
+                    if (data.fatal) {
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            hlsInstance.startLoad();
+                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            hlsInstance.recoverMediaError();
+                        } else {
+                            msg.textContent = "Error playing live feed.";
+                            msg.classList.remove("hidden");
+                        }
+                    }
+                });
+            } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+                video.src = url;
+                video.addEventListener("loadedmetadata", function() {
+                    video.play().catch(() => {});
+                });
+            } else {
+                msg.textContent = "Your browser does not support HLS streaming.";
+                msg.classList.remove("hidden");
+            }
+        }
+
+        window.closePlayer = function() {
+            const video = document.getElementById("native-video");
+            const modal = document.getElementById("player-modal");
+
+            video.pause();
+            video.src = "";
+            if (hlsInstance) {
+                hlsInstance.destroy();
+                hlsInstance = null;
+            }
+
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+            document.body.classList.remove("modal-open");
+
+            // Clear URL parameters
+            const newUrl = new URL(window.location.href);
+            newUrl.searchParams.delete("id");
+            newUrl.searchParams.delete("r");
+            window.history.replaceState(null, "", newUrl.toString());
+            currentMatch = null;
+            currentQuality = null;
+        };
+
+        function checkDeepLink() {
+            const params = new URLSearchParams(location.search);
+            const shareId = params.get("id");
+            const shareRes = params.get("r");
+            console.log("Deep link check:", { shareId, shareRes, allMatchesCount: allMatches.length });
+            if (shareId) {
+                const matchIndex = allMatches.findIndex(m => String(m.match_id).toLowerCase() === shareId.toLowerCase());
+                console.log("Found match index:", matchIndex);
+                if (matchIndex !== -1) {
+                    const m = allMatches[matchIndex];
+                    const qualities = parseQualities(m);
+                    console.log("Qualities found:", qualities);
+                    if (qualities.length > 0) {
+                        currentMatch = m;
+                        if (shareRes) {
+                            const q = qualities.find(x => x.res.toLowerCase() === shareRes.toLowerCase() || x.res.replace("p","") === shareRes.replace("p",""));
+                            console.log("Matched quality:", q);
+                            if (q) {
+                                currentQuality = q;
+                                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
+                                launchPlayer(selectedStreamUrl);
+                                return;
+                            }
+                        }
+                        openQuality(matchIndex, m.title, m.event_name);
+                    }
+                }
+            }
+        }
+
+        // Share button logic
+        document.getElementById("btn-share-match").onclick = function() {
+            const shareUrl = window.location.href;
+            navigator.clipboard.writeText(shareUrl).then(() => {
+                const btn = document.getElementById("btn-share-match");
+                const originalText = btn.innerHTML;
+                btn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    Copied!
+                `;
+                setTimeout(() => {
+                    btn.innerHTML = originalText;
+                }, 2000);
+            }).catch(() => {
+                alert("Failed to copy link. Please copy the URL from your browser address bar.");
+            });
+        };
+
+        function renderCard(m, globalIndex) {
+            const isLive = (m.status||"").toUpperCase() === "LIVE";
+            const img = m.src || m.image || (m.image_cdn && m.image_cdn.APP) || FALLBACK_IMG;
+            
+            let displayTitle = m.title;
+            if (m.team_1 && m.team_2) {
+                displayTitle = `${m.team_1} vs ${m.team_2}`;
+            } else if (m.match_name) {
+                displayTitle = m.match_name;
+            }
+            
+            const badge = isLive 
+                ? '<span class="inline-flex items-center gap-1.5 text-[10px] font-black text-white bg-red-600 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 bg-white rounded-full animate-pulse"></span>LIVE</span>' 
+                : '<span class="inline-flex items-center text-[10px] font-bold text-slate-400 bg-slate-800/80 px-2 py-0.5 rounded-full border border-slate-700/40">UPCOMING</span>';
+
+            const btn = isLive
+                ? `<button class="w-full bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-xs font-bold transition transform active:scale-95" onclick="openQuality(${globalIndex}, '${esc(displayTitle)}', '${esc(m.event_name)}')">â–¶ WATCH LIVE</button>`
+                : '<button class="w-full bg-slate-800/60 text-slate-500 py-2 rounded-lg text-xs font-bold cursor-not-allowed border border-slate-800" disabled>â³ Not Live Yet</button>';
+
+            return `
+                <div class="match-card rounded-xl overflow-hidden shadow-lg flex flex-col">
+                    <img class="w-full aspect-[16/9] object-cover bg-slate-950" src="${esc(img)}" loading="lazy" onerror="this.src='${FALLBACK_IMG}'" alt="">
+                    <div class="p-4 flex-grow flex flex-col justify-between gap-4">
+                        <div>
+                            <div class="flex items-center justify-between gap-2 mb-2">
+                                ${badge}
+                                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">${esc(m.event_category || 'Sports')}</span>
+                            </div>
+                            <h3 class="text-sm font-bold text-white line-clamp-2 mb-1.5 leading-snug">${esc(displayTitle)}</h3>
+                            <p class="text-[11px] text-slate-400 truncate">${esc(m.event_name)}</p>
+                        </div>
+                        <div>
+                            <div class="text-[11px] text-slate-400 mb-3 flex items-center gap-1.5">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                ðŸ• ${esc(m.startTime || 'TBA')}
+                            </div>
+                            ${btn}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function render(filter) {
+            currentFilter = filter;
+            const filtered = filter === "ALL" ? allMatches : allMatches.filter(m => (m.event_category||"").toUpperCase() === filter.toUpperCase());
+            const live = filtered.filter(m => (m.status||"").toUpperCase() === "LIVE");
+            const upcoming = filtered.filter(m => (m.status||"").toUpperCase() !== "LIVE");
+
+            const ls = document.getElementById("live-section"), us = document.getElementById("upcoming-section");
+            
+            if (live.length > 0) {
+                ls.classList.remove("hidden");
+                document.getElementById("live-grid").innerHTML = live.map(m => renderCard(m, allMatches.indexOf(m))).join("");
+            } else ls.classList.add("hidden");
+
+            if (upcoming.length > 0) {
+                us.classList.remove("hidden");
+                document.getElementById("upcoming-grid").innerHTML = upcoming.map(m => renderCard(m, allMatches.indexOf(m))).join("");
+            } else us.classList.add("hidden");
+
+            document.querySelectorAll(".filter-btn").forEach(b => {
+                const isSelected = b.dataset.filter === filter;
+                b.className = isSelected 
+                    ? "filter-btn bg-red-600 text-white px-4 py-1.5 rounded-full text-sm font-bold transition shadow-lg shadow-red-950/20"
+                    : "filter-btn bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700/60 px-4 py-1.5 rounded-full text-sm font-bold transition";
+            });
+        }
+
+        function buildFilters(matches) {
+            const cats = [...new Set(matches.map(m => m.event_category || "Other"))];
+            const c = document.getElementById("filters");
+            c.innerHTML = '<button class="filter-btn" data-filter="ALL">All</button>' + cats.map(cat => '<button class="filter-btn" data-filter="'+esc(cat)+'">'+esc(cat)+'</button>').join("");
+            c.addEventListener("click", e => { if (e.target.classList.contains("filter-btn")) render(e.target.dataset.filter); });
+        }
+
+        function loadData() {
+            fetch(API, { cache: "no-store" }).then(r => r.json()).then(data => {
+                document.getElementById("loader").style.display = "none";
+                allMatches = dedup(data.matches || []);
+                const lc = allMatches.filter(m => (m.status||"").toUpperCase() === "LIVE").length;
+                document.getElementById("live-count").textContent = lc;
+                buildFilters(allMatches);
+                render("ALL");
+                checkDeepLink();
+            }).catch(() => {
+                document.getElementById("loader").innerHTML = '<p class="text-red-500 font-semibold">Failed to load matches. Please refresh to retry.</p>';
+            });
+        }
+
+        loadData();
+
+        // Auto-refresh every 5 min
+        setInterval(() => {
+            fetch(API, { cache: "no-store" }).then(r => r.json()).then(data => {
+                allMatches = dedup(data.matches || []);
+                const lc = allMatches.filter(m => (m.status||"").toUpperCase() === "LIVE").length;
+                document.getElementById("live-count").textContent = lc;
+                render(currentFilter);
+            }).catch(() => {});
+        }, 5 * 60 * 1000);
+    })();
+    </script>
+</body>
+</html>
+
