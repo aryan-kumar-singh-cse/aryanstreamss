@@ -42,7 +42,7 @@
 </head>
 <body>
     <div id="loading"><div class="spinner"></div></div>
-    <a href="index.html" id="back-btn">â† Back</a>
+    <a href="index.html" id="back-btn">← Back</a>
     <div id="player-container">
         <video id="video" playsinline webkit-playsinline autoplay></video>
     </div>
@@ -86,7 +86,13 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        async function pickProxyEndpoint() { return "/proxy"; }
+        async function pickProxyEndpoint() {
+            if (location.protocol === "file:") return "http://localhost:3000/proxy";
+
+            var candidates = [];
+            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
+                candidates.push("http://localhost:3000/proxy");
+            }
             if (location.pathname.indexOf("/fancode/") !== -1) {
                 candidates.push("/proxy", "/proxy", "/api/proxy");
             } else {
@@ -141,7 +147,7 @@
                 $video.play().catch(function(){});
             }).catch(function(e) {
                 console.error('Load error:', e);
-                showError('Stream load failed â€“ retrying...');
+                showError('Stream load failed – retrying...');
                 setTimeout(function(){ location.reload(); }, 5000);
             });
 
@@ -151,7 +157,7 @@
             player.addEventListener('error', function(ev) {
                 var err = ev.detail;
                 if (err && err.severity === shaka.util.Error.Severity.RECOVERABLE) return;
-                showError('Playback error â€“ retrying...');
+                showError('Playback error – retrying...');
                 setTimeout(function(){ player.load(MPD_URL).catch(function(){}); }, 5000);
             });
 
@@ -168,4 +174,3 @@
     </script>
 </body>
 </html>
-
