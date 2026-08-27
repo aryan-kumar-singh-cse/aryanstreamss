@@ -193,7 +193,7 @@
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <script>
     (function() {
-        const API = "https://raw.githubusercontent.com/drmlive/fancode-live-events/main/fancode.json";
+        const API = "/proxy?url=" + encodeURIComponent("https://raw.githubusercontent.com/drmlive/fancode-live-events/main/fancode.json");
         const FALLBACK_IMG = "https://www.fancode.com/skillup-uploads/cms-media/Cricket_Fallback_Old_match-card.jpg";
         let allMatches = [], currentFilter = "ALL", currentMatch = null, currentQuality = null;
         let selectedStreamUrl = "", hlsInstance = null;
