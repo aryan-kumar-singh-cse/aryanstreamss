@@ -143,7 +143,7 @@
                 </div>
 
                 <div class="w-full bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800 relative" style="aspect-ratio: 16 / 9;">
-                    <video id="native-video" controls autoplay playsinline referrerpolicy="no-referrer"></video>
+                    <video id="native-video" controls autoplay muted playsinline referrerpolicy="no-referrer"></video>
                     <div id="player-message" class="hidden absolute inset-0 items-center justify-center bg-black/80 text-center px-6 text-sm text-slate-300"></div>
                 </div>
             </div>
@@ -403,25 +403,58 @@
 
             msg.classList.add("hidden");
 
+            // Reset video muted state (muted for autoplay, user can unmute)
+            video.muted = true;
+
+            // Timeout to show error if stream doesn't start in 15s
+            let started = false;
+            const loadTimeout = setTimeout(() => {
+                if (!started) {
+                    msg.innerHTML = 'Stream failed to load. <button onclick="window.retryPlayer()" style="text-decoration:underline;color:#ef4444;">Tap to Retry</button>';
+                    msg.style.display = "flex";
+                    msg.classList.remove("hidden");
+                }
+            }, 15000);
+
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
                     enableWorker: true,
-                    lowLatencyMode: true,
                     xhrSetup: function(xhr) { xhr.withCredentials = false; }
                 });
                 hlsInstance.loadSource(url);
                 hlsInstance.attachMedia(video);
                 hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                    video.play().catch(() => {});
+                    video.play().then(() => {
+                        started = true;
+                        clearTimeout(loadTimeout);
+                    }).catch(() => {
+                        // Autoplay blocked — show tap-to-play overlay
+                        started = true;
+                        clearTimeout(loadTimeout);
+                        msg.innerHTML = 'Tap anywhere to play';
+                        msg.style.display = "flex";
+                        msg.classList.remove("hidden");
+                        msg.onclick = function() {
+                            video.play();
+                            msg.classList.add("hidden");
+                        };
+                    });
+                });
+                hlsInstance.on(Hls.Events.FRAG_LOADED, function() {
+                    started = true;
+                    clearTimeout(loadTimeout);
+                    msg.classList.add("hidden");
                 });
                 hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
                     if (data.fatal) {
+                        clearTimeout(loadTimeout);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
                             hlsInstance.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             hlsInstance.recoverMediaError();
                         } else {
-                            msg.textContent = "Error playing live feed.";
+                            msg.innerHTML = 'Stream error. <button onclick="window.retryPlayer()" style="text-decoration:underline;color:#ef4444;">Tap to Retry</button>';
+                            msg.style.display = "flex";
                             msg.classList.remove("hidden");
                         }
                     }
@@ -429,13 +462,21 @@
             } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
                 video.src = url;
                 video.addEventListener("loadedmetadata", function() {
-                    video.play().catch(() => {});
+                    video.play().then(() => {
+                        started = true;
+                        clearTimeout(loadTimeout);
+                    }).catch(() => {});
                 });
             } else {
+                clearTimeout(loadTimeout);
                 msg.textContent = "Your browser does not support HLS streaming.";
                 msg.classList.remove("hidden");
             }
         }
+
+        window.retryPlayer = function() {
+            if (selectedStreamUrl) launchPlayer(selectedStreamUrl);
+        };
 
         window.closePlayer = function() {
             const video = document.getElementById("native-video");
