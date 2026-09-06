@@ -210,12 +210,14 @@
             });
         }
 
-        // Proxy pool - add your standalone Cloudflare Worker URLs here to share the request quota
+        // Proxy pool - rotates across multiple Cloudflare accounts (100k requests/day each)
         const PROXY_POOL = [
-            "/proxy"
+            "/proxy",
+            "https://fcp1.abc-funs-official.workers.dev",
+            "https://fcp2.monty69and.workers.dev"
         ];
-        let proxyIndex = 0;
-        let proxyEndpoint = PROXY_POOL[0];
+        let proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
+        let proxyEndpoint = PROXY_POOL[proxyIndex];
 
         function getNextProxy() {
             proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
