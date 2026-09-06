@@ -1,16 +1,17 @@
 ﻿/**
  * Cloudflare Pages _worker.js
- * Works with BOTH GitHub-connected AND manual drag-and-drop deployments.
- * Handles /proxy route; all other requests served as static files via env.ASSETS.
+ * High-Performance CORS Proxy with Edge Caching
+ * Caches immutable video segments (.ts) for 180s to collapse repetitive requests
+ * across dozens/hundreds of concurrent viewers into single edge requests.
  */
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, context) {
     const url = new URL(request.url);
 
     // Only intercept /proxy requests
     if (url.pathname !== "/proxy") {
-      return env.ASSETS.fetch(request);
+      return env.ASSETS ? env.ASSETS.fetch(request) : new Response("Not found", { status: 404 });
     }
 
     const targetUrl = url.searchParams.get("url");
@@ -30,6 +31,28 @@ export default {
       return new Response("Missing url parameter", { status: 400, headers: corsHeaders });
     }
 
+    const isM3U8 = targetUrl.includes(".m3u8") || targetUrl.includes("m3u8");
+
+    // Check Cloudflare Edge Cache for TS / media segments (never cache m3u8 playlists)
+    const cache = caches.default;
+    const cacheKey = new Request(request.url, { method: "GET" });
+    if (!isM3U8 && request.method === "GET") {
+      try {
+        const cachedResponse = await cache.match(cacheKey);
+        if (cachedResponse) {
+          const newHeaders = new Headers(cachedResponse.headers);
+          newHeaders.set("Access-Control-Allow-Origin", "*");
+          newHeaders.set("X-Proxy-Cache", "HIT");
+          return new Response(cachedResponse.body, {
+            status: cachedResponse.status,
+            statusText: cachedResponse.statusText,
+            headers: newHeaders,
+          });
+        }
+      } catch (_) {}
+    }
+
+    // Build upstream headers
     const upstreamHeaders = {
       "User-Agent": request.headers.get("User-Agent") ||
         "Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
@@ -53,20 +76,28 @@ export default {
     if (range) upstreamHeaders["Range"] = range;
 
     try {
-      const response = await fetch(targetUrl, {
+      const fetchOptions = {
         method: "GET",
         headers: upstreamHeaders,
         redirect: "follow",
-      });
+      };
+
+      if (!isM3U8) {
+        fetchOptions.cf = {
+          cacheEverything: true,
+          cacheTtl: 180,
+        };
+      }
+
+      const response = await fetch(targetUrl, fetchOptions);
 
       const contentType = response.headers.get("content-type") || "";
-      const isM3U8 =
+      const isActuallyM3U8 = isM3U8 ||
         contentType.includes("mpegurl") ||
-        contentType.includes("x-mpegurl") ||
-        targetUrl.includes(".m3u8");
+        contentType.includes("x-mpegurl");
 
       let body;
-      if (isM3U8) {
+      if (isActuallyM3U8) {
         let text = await response.text();
         const finalUrl = response.url || targetUrl;
         let baseUrl;
@@ -103,7 +134,13 @@ export default {
       const responseHeaders = new Headers();
       for (const [k, v] of response.headers.entries()) {
         const kl = k.toLowerCase();
-        if (kl !== "access-control-allow-origin" && kl !== "x-frame-options" && kl !== "content-security-policy") {
+        if (
+          kl !== "access-control-allow-origin" &&
+          kl !== "x-frame-options" &&
+          kl !== "content-security-policy" &&
+          kl !== "set-cookie" &&
+          kl !== "cache-control"
+        ) {
           responseHeaders.set(k, v);
         }
       }
@@ -111,11 +148,30 @@ export default {
       responseHeaders.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
       responseHeaders.set("Access-Control-Allow-Headers", "*");
 
-      return new Response(body, {
+      if (isActuallyM3U8) {
+        responseHeaders.set("Cache-Control", "no-cache, no-store, must-revalidate");
+      } else {
+        responseHeaders.set("Cache-Control", "public, max-age=180, s-maxage=180");
+        responseHeaders.set("X-Proxy-Cache", "MISS");
+      }
+
+      const clientResponse = new Response(body, {
         status: response.status,
         statusText: response.statusText,
         headers: responseHeaders,
       });
+
+      if (!isActuallyM3U8 && response.status === 200 && request.method === "GET") {
+        try {
+          if (context && typeof context.waitUntil === "function") {
+            context.waitUntil(cache.put(cacheKey, clientResponse.clone()));
+          } else {
+            cache.put(cacheKey, clientResponse.clone()).catch(() => {});
+          }
+        } catch (_) {}
+      }
+
+      return clientResponse;
     } catch (err) {
       return new Response("Proxy error: " + err.message, {
         status: 502,
