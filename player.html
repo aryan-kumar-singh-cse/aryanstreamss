@@ -183,9 +183,15 @@
 
         // --- HLS setup ---
         video.muted = true;
-        streamUrl = proxyUrl(proxyEndpoint, rawUrl);
+        var isDirect = true;
+        var retryCount = 0;
+        var retryTimer = null;
+        streamUrl = rawUrl; // Direct first (Speedsters method) - ZERO Cloudflare requests!
 
-        function startHls(currentStreamUrl) {
+        function startHls(currentStreamUrl, isFallback) {
+            clearTimeout(retryTimer);
+            if (!isFallback) retryCount = 0;
+
             if (hlsInstance) {
                 hlsInstance.destroy();
                 hlsInstance = null;
@@ -212,22 +218,45 @@
                 hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
                 hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
                     var errDetail = data.details || "";
-                    var errStatus = (data.response && data.response.status) ? " Status: " + data.response.status : "";
+                    var status = (data.response && data.response.status) ? data.response.status : 0;
                     console.error("HLS Error:", data);
                     if (data.fatal) {
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            if (data.response && (data.response.status === 429 || data.response.status >= 500)) {
+                            // Step 1: If direct stream failed, switch to proxy pool
+                            if (isDirect) {
+                                console.log("Direct stream failed, falling back to proxy pool...");
+                                isDirect = false;
                                 var nextEp = getNextProxy();
-                                startHls(proxyUrl(nextEp, rawUrl));
+                                startHls(proxyUrl(nextEp, rawUrl), true);
                                 return;
                             }
-                            showError("Network error (" + errDetail + errStatus + ") – retrying...");
-                            hlsInstance.startLoad();
+
+                            // Step 2: If proxy failed (status 0, 429, or >= 500), rotate to next proxy
+                            if (status === 0 || status === 429 || status >= 500) {
+                                if (retryCount < PROXY_POOL.length) {
+                                    retryCount++;
+                                    var nextEp = getNextProxy();
+                                    console.log("Proxy error (" + status + "), rotating to next proxy...");
+                                    startHls(proxyUrl(nextEp, rawUrl), true);
+                                    return;
+                                }
+                            }
+
+                            // Step 3: Capped retry with backoff
+                            if (retryCount < 2) {
+                                retryCount++;
+                                showError("Reconnecting stream...");
+                                retryTimer = setTimeout(function() {
+                                    if (hlsInstance) hlsInstance.startLoad();
+                                }, 1500);
+                            } else {
+                                showError("Connection lost. Please refresh or tap back.");
+                            }
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             showError("Media error (" + errDetail + ") – recovering...");
                             hlsInstance.recoverMediaError();
                         } else {
-                            showError("Stream failed (" + errDetail + errStatus + ")");
+                            showError("Stream error. Please try another quality or refresh.");
                         }
                     }
                 });
