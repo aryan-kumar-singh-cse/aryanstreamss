@@ -210,31 +210,20 @@
             });
         }
 
-        let proxyEndpoint = "/proxy";
-        async function pickProxyEndpoint() {
-            if (location.protocol === "file:") return "http://localhost:3000/proxy";
+        // Multi-proxy pool across multiple Cloudflare accounts to divide request load
+        const PROXY_POOL = [
+            "/proxy",
+            "https://aryanstreams.pages.dev/proxy",
+            "https://aurastreams.pages.dev/proxy"
+        ];
+        let proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
+        let proxyEndpoint = PROXY_POOL[proxyIndex];
 
-            var candidates = [];
-            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
-                candidates.push("http://localhost:3000/proxy");
-            }
-            if (location.pathname.indexOf("/fancode/") !== -1) {
-                candidates.push("/proxy", "/proxy");
-            } else {
-                candidates.push("/proxy", "/proxy");
-            }
-            for (var i = 0; i < candidates.length; i++) {
-                try {
-                    var res = await fetch(candidates[i], { method: "GET", cache: "no-store" });
-                    var text = await res.clone().text().catch(function(){ return ""; });
-                    if (res.status === 400 && /missing/i.test(text)) return candidates[i];
-                } catch (e) {}
-            }
-            return location.pathname.indexOf("/fancode/") !== -1 ? "/proxy" : "/proxy";
+        function getNextProxy() {
+            proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
+            proxyEndpoint = PROXY_POOL[proxyIndex];
+            return proxyEndpoint;
         }
-        pickProxyEndpoint().then(function(endpoint) {
-            proxyEndpoint = endpoint;
-        }).catch(function() {});
 
         function decodeHex(hex) {
             if (!hex) return "";
@@ -416,10 +405,20 @@
                 }
             }, 15000);
 
+            if (hlsInstance) {
+                hlsInstance.destroy();
+                hlsInstance = null;
+            }
+
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
                     enableWorker: true,
-                    xhrSetup: function(xhr) { xhr.withCredentials = false; }
+                    xhrSetup: function(xhr) { xhr.withCredentials = false; },
+                    maxBufferLength: 15,            // Buffer max 15s ahead to save ~30-40% unneeded requests
+                    maxMaxBufferLength: 30,
+                    liveSyncDurationCount: 3,       // Stay 3 fragments behind live edge smoothly
+                    liveMaxLatencyDurationCount: 6,
+                    maxBufferHole: 0.5
                 });
                 hlsInstance.loadSource(url);
                 hlsInstance.attachMedia(video);
@@ -449,6 +448,15 @@
                     if (data.fatal) {
                         clearTimeout(loadTimeout);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            // If proxy rate-limited (429) or failed, seamlessly failover to next proxy
+                            if (data.response && (data.response.status === 429 || data.response.status >= 500)) {
+                                const nextProxy = getNextProxy();
+                                if (currentQuality) {
+                                    selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
+                                    launchPlayer(selectedStreamUrl);
+                                    return;
+                                }
+                            }
                             hlsInstance.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             hlsInstance.recoverMediaError();
@@ -475,7 +483,13 @@
         }
 
         window.retryPlayer = function() {
-            if (selectedStreamUrl) launchPlayer(selectedStreamUrl);
+            const nextProxy = getNextProxy();
+            if (currentQuality) {
+                selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
+                launchPlayer(selectedStreamUrl);
+            } else if (selectedStreamUrl) {
+                launchPlayer(selectedStreamUrl);
+            }
         };
 
         window.closePlayer = function() {

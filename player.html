@@ -166,78 +166,79 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        async function pickProxyEndpoint() {
-            if (location.protocol === "file:") return "http://localhost:3000/proxy";
+        const PROXY_POOL = [
+            "/proxy",
+            "https://aryanstreams.pages.dev/proxy",
+            "https://aurastreams.pages.dev/proxy"
+        ];
+        var proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
+        var proxyEndpoint = PROXY_POOL[proxyIndex];
 
-            var candidates = [];
-            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
-                candidates.push("http://localhost:3000/proxy");
-            }
-            if (location.pathname.indexOf("/fancode/") !== -1) {
-                candidates.push("/proxy", "/proxy");
-            } else {
-                candidates.push("/proxy", "/proxy");
-            }
-            for (var i = 0; i < candidates.length; i++) {
-                try {
-                    var res = await fetch(candidates[i], { method: "GET", cache: "no-store" });
-                    var text = await res.clone().text().catch(function(){ return ""; });
-                    if (res.status === 400 && /missing/i.test(text)) return candidates[i];
-                } catch (e) {}
-            }
-            return location.pathname.indexOf("/fancode/") !== -1 ? "/proxy" : "/proxy";
+        function getNextProxy() {
+            proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
+            proxyEndpoint = PROXY_POOL[proxyIndex];
+            return proxyEndpoint;
         }
 
         // --- HLS setup ---
         video.muted = true;
+        streamUrl = proxyUrl(proxyEndpoint, rawUrl);
 
-        pickProxyEndpoint().then(function(proxyEndpoint) {
-            streamUrl = proxyUrl(proxyEndpoint, rawUrl);
+        function startHls(currentStreamUrl) {
+            if (hlsInstance) {
+                hlsInstance.destroy();
+                hlsInstance = null;
+            }
 
-        if (window.Hls && Hls.isSupported()) {
-            hlsInstance = new Hls({
-                enableWorker: true,
-                lowLatencyMode: true,
-                xhrSetup: function(xhr) { xhr.withCredentials = false; },
-                abrEwmaDefaultEstimate: 5000000,
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60
-            });
-            hlsInstance.loadSource(streamUrl);
-            hlsInstance.attachMedia(video);
+            if (window.Hls && Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    enableWorker: true,
+                    xhrSetup: function(xhr) { xhr.withCredentials = false; },
+                    maxBufferLength: 15,
+                    maxMaxBufferLength: 30,
+                    liveSyncDurationCount: 3,
+                    liveMaxLatencyDurationCount: 6,
+                    maxBufferHole: 0.5
+                });
+                hlsInstance.loadSource(currentStreamUrl);
+                hlsInstance.attachMedia(video);
 
-            hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                hideLoading();
-                buildQMenu(-1);
-                video.play().catch(function(){});
-            });
-            hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
-            hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
-                var errDetail = data.details || "";
-                var errStatus = (data.response && data.response.status) ? " Status: " + data.response.status : "";
-                console.error("HLS Error:", data);
-                if (data.fatal) {
-                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                        showError("Network error (" + errDetail + errStatus + ") – retrying...");
-                        hlsInstance.startLoad();
-                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        showError("Media error (" + errDetail + ") – recovering...");
-                        hlsInstance.recoverMediaError();
-                    } else {
-                        showError("Stream failed (" + errDetail + errStatus + ")");
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+                    hideLoading();
+                    buildQMenu(-1);
+                    video.play().catch(function(){});
+                });
+                hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
+                hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
+                    var errDetail = data.details || "";
+                    var errStatus = (data.response && data.response.status) ? " Status: " + data.response.status : "";
+                    console.error("HLS Error:", data);
+                    if (data.fatal) {
+                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                            if (data.response && (data.response.status === 429 || data.response.status >= 500)) {
+                                var nextEp = getNextProxy();
+                                startHls(proxyUrl(nextEp, rawUrl));
+                                return;
+                            }
+                            showError("Network error (" + errDetail + errStatus + ") – retrying...");
+                            hlsInstance.startLoad();
+                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                            showError("Media error (" + errDetail + ") – recovering...");
+                            hlsInstance.recoverMediaError();
+                        } else {
+                            showError("Stream failed (" + errDetail + errStatus + ")");
+                        }
                     }
-                }
-            });
-        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = streamUrl;
-            video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
-        } else {
-            hideLoading(); showError("HLS not supported.");
+                });
+            } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+                video.src = currentStreamUrl;
+                video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
+            } else {
+                hideLoading(); showError("HLS not supported.");
+            }
         }
-        }).catch(function() {
-            hideLoading();
-            showError("Proxy route not available.");
-        });
+
+        startHls(streamUrl);
 
         // --- Controls ---
         var playBtn = document.getElementById("play-btn");
