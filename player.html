@@ -166,13 +166,12 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
+        // Proxy pool - add your standalone Cloudflare Worker URLs here to share the request quota
         const PROXY_POOL = [
-            "/proxy",
-            "https://aryanstreams.pages.dev/proxy",
-            "https://aurastreams.pages.dev/proxy"
+            "/proxy"
         ];
-        var proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
-        var proxyEndpoint = PROXY_POOL[proxyIndex];
+        var proxyIndex = 0;
+        var proxyEndpoint = PROXY_POOL[0];
 
         function getNextProxy() {
             proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
