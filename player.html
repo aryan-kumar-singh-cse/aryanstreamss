@@ -93,7 +93,7 @@
 </head>
 <body>
     <div id="loading"><div class="spinner"></div></div>
-    <a href="index.html" id="back-btn">← Back</a>
+    <a href="/" id="back-btn">← Back</a>
 
     <div class="player-shell">
         <div id="video-area" class="video-area">
@@ -166,11 +166,9 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        // Proxy pool - rotates across multiple Cloudflare accounts (100k requests/day each)
+        // Proxy pool - verified working Cloudflare Workers
         const PROXY_POOL = [
-            "/proxy",
-            "https://fcp1.abc-funs-official.workers.dev",
-            "https://fcp2.monty69and.workers.dev"
+            "https://fcp1.abc-funs-official.workers.dev"
         ];
         var proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
         var proxyEndpoint = PROXY_POOL[proxyIndex];
@@ -183,10 +181,11 @@
 
         // --- HLS setup ---
         video.muted = true;
-        var isDirect = true;
         var retryCount = 0;
         var retryTimer = null;
-        streamUrl = rawUrl; // Direct first (Speedsters method) - ZERO Cloudflare requests!
+        streamUrl = (rawUrl.includes("workers.dev") || rawUrl.startsWith("/proxy"))
+            ? rawUrl
+            : proxyUrl(proxyEndpoint, rawUrl);
 
         function startHls(currentStreamUrl, isFallback) {
             clearTimeout(retryTimer);
@@ -222,17 +221,8 @@
                     console.error("HLS Error:", data);
                     if (data.fatal) {
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            // Step 1: If direct stream failed, switch to proxy pool
-                            if (isDirect) {
-                                console.log("Direct stream failed, falling back to proxy pool...");
-                                isDirect = false;
-                                var nextEp = getNextProxy();
-                                startHls(proxyUrl(nextEp, rawUrl), true);
-                                return;
-                            }
-
-                            // Step 2: If proxy failed (status 0, 429, or >= 500), rotate to next proxy
-                            if (status === 0 || status === 429 || status >= 500) {
+                            // If proxy failed (status 0, 429, or >= 500), rotate to next proxy if pool has more
+                            if ((status === 0 || status === 429 || status >= 500) && PROXY_POOL.length > 1) {
                                 if (retryCount < PROXY_POOL.length) {
                                     retryCount++;
                                     var nextEp = getNextProxy();
@@ -242,7 +232,7 @@
                                 }
                             }
 
-                            // Step 3: Capped retry with backoff
+                            // Capped retry with backoff
                             if (retryCount < 2) {
                                 retryCount++;
                                 showError("Reconnecting stream...");

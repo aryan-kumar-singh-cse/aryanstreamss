@@ -210,11 +210,9 @@
             });
         }
 
-        // Proxy pool - rotates across multiple Cloudflare accounts (100k requests/day each)
+        // Proxy pool - verified working Cloudflare Workers
         const PROXY_POOL = [
-            "/proxy",
-            "https://fcp1.abc-funs-official.workers.dev",
-            "https://fcp2.monty69and.workers.dev"
+            "https://fcp1.abc-funs-official.workers.dev"
         ];
         let proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
         let proxyEndpoint = PROXY_POOL[proxyIndex];
@@ -343,7 +341,6 @@
             currentQuality = null;
         };
 
-        let isDirectStream = true;
         let streamRetryCount = 0;
         let streamRetryTimer = null;
 
@@ -364,10 +361,8 @@
                 // Redirect directly for DRM protected streams
                 window.location.href = q.url;
             } else {
-                // Direct stream first (Competitor/Speedsters method) - ZERO Cloudflare requests!
-                // If direct playback ever errors out, automatic failover seamlessly switches to PROXY_POOL.
-                selectedStreamUrl = q.url;
-                isDirectStream = true;
+                const proxy = proxyEndpoint || PROXY_POOL[0];
+                selectedStreamUrl = proxy + "?url=" + encodeURIComponent(q.url);
                 showTelegramModal();
             }
         }
@@ -406,13 +401,12 @@
             // Reset video muted state (muted for autoplay, user can unmute)
             video.muted = true;
 
-            // Timeout to show error if stream doesn't start in 12s
+            // Timeout to show error if stream doesn't start in 10s
             let started = false;
             const loadTimeout = setTimeout(() => {
                 if (!started) {
-                    if (isDirectStream && currentQuality) {
-                        console.log("Direct stream connection timed out, failing over to proxy...");
-                        isDirectStream = false;
+                    if (currentQuality && PROXY_POOL.length > 1 && streamRetryCount < PROXY_POOL.length) {
+                        streamRetryCount++;
                         const nextProxy = getNextProxy();
                         selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
                         launchPlayer(selectedStreamUrl, true);
@@ -422,7 +416,7 @@
                     msg.style.display = "flex";
                     msg.classList.remove("hidden");
                 }
-            }, 12000);
+            }, 10000);
 
             if (hlsInstance) {
                 hlsInstance.destroy();
@@ -469,24 +463,14 @@
                     if (data.fatal) {
                         clearTimeout(loadTimeout);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            // Step 1: If direct stream failed (CORS or network error), switch to proxy pool seamlessly
-                            if (isDirectStream && currentQuality) {
-                                console.log("Direct stream network error, seamlessly switching to proxy pool...");
-                                isDirectStream = false;
-                                const nextProxy = getNextProxy();
-                                selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
-                                launchPlayer(selectedStreamUrl, true);
-                                return;
-                            }
-
-                            // Step 2: If proxy failed or rate-limited (status 0, 429, or >= 500), rotate to next proxy
                             const status = data.response ? data.response.status : 0;
-                            if (status === 0 || status === 429 || status >= 500) {
+                            // If proxy failed or rate-limited, rotate to next proxy if pool has alternatives
+                            if ((status === 0 || status === 429 || status >= 500) && PROXY_POOL.length > 1) {
                                 if (streamRetryCount < PROXY_POOL.length) {
                                     streamRetryCount++;
                                     const nextProxy = getNextProxy();
                                     if (currentQuality) {
-                                        console.log("Proxy error (" + status + "), rotating to next proxy (" + streamRetryCount + "/" + PROXY_POOL.length + ")...");
+                                        console.log("Proxy error (" + status + "), rotating to next proxy...");
                                         selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
                                         launchPlayer(selectedStreamUrl, true);
                                         return;
@@ -494,7 +478,7 @@
                                 }
                             }
 
-                            // Step 3: Capped retry with backoff (prevents fast infinite loop of death)
+                            // Capped retry with backoff (prevents fast infinite loop)
                             if (streamRetryCount < 2) {
                                 streamRetryCount++;
                                 streamRetryTimer = setTimeout(() => {
@@ -531,7 +515,6 @@
 
         window.retryPlayer = function() {
             streamRetryCount = 0;
-            isDirectStream = false;
             const nextProxy = getNextProxy();
             if (currentQuality) {
                 selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
@@ -585,8 +568,8 @@
                             console.log("Matched quality:", q);
                             if (q) {
                                 currentQuality = q;
-                                selectedStreamUrl = q.url;
-                                isDirectStream = true;
+                                const proxy = proxyEndpoint || PROXY_POOL[0];
+                                selectedStreamUrl = proxy + "?url=" + encodeURIComponent(q.url);
                                 launchPlayer(selectedStreamUrl);
                                 return;
                             }
