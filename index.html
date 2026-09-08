@@ -210,18 +210,7 @@
             });
         }
 
-        // Proxy pool - verified working Cloudflare Workers
-        const PROXY_POOL = [
-            "https://fcp1.abc-funs-official.workers.dev"
-        ];
-        let proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
-        let proxyEndpoint = PROXY_POOL[proxyIndex];
-
-        function getNextProxy() {
-            proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
-            proxyEndpoint = PROXY_POOL[proxyIndex];
-            return proxyEndpoint;
-        }
+        const proxyEndpoint = "/proxy";
 
         function decodeHex(hex) {
             if (!hex) return "";
@@ -234,7 +223,7 @@
 
         // Parsing M3U8 string inside auto_streams
         function parseQualities(m) {
-            const hexData = m.google_m3u8_hex || m.akamai_m3u8_hex || m.m3u8_hex || m.hex || "";
+            const hexData = m.google_m3u8_hex || m.m3u8_hex || m.hex || "";
             if (hexData) {
                 const text = decodeHex(hexData);
                 const lines = text.split("\n");
@@ -341,9 +330,6 @@
             currentQuality = null;
         };
 
-        let streamRetryCount = 0;
-        let streamRetryTimer = null;
-
         function handleQualitySelect(q) {
             document.getElementById("quality-modal").classList.add("hidden");
             document.getElementById("quality-modal").classList.remove("flex");
@@ -361,8 +347,8 @@
                 // Redirect directly for DRM protected streams
                 window.location.href = q.url;
             } else {
-                const proxy = proxyEndpoint || PROXY_POOL[0];
-                selectedStreamUrl = proxy + "?url=" + encodeURIComponent(q.url);
+                // Route stream through our Cloudflare Function CORS proxy
+                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
                 showTelegramModal();
             }
         }
@@ -382,7 +368,7 @@
             launchPlayer(selectedStreamUrl);
         };
 
-        function launchPlayer(url, isFallback = false) {
+        function launchPlayer(url) {
             const video = document.getElementById("native-video");
             const modal = document.getElementById("player-modal");
             const msg = document.getElementById("player-message");
@@ -392,48 +378,24 @@
             document.body.classList.add("modal-open");
 
             msg.classList.add("hidden");
-            clearTimeout(streamRetryTimer);
-
-            if (!isFallback) {
-                streamRetryCount = 0;
-            }
 
             // Reset video muted state (muted for autoplay, user can unmute)
             video.muted = true;
 
-            // Timeout to show error if stream doesn't start in 10s
+            // Timeout to show error if stream doesn't start in 15s
             let started = false;
             const loadTimeout = setTimeout(() => {
                 if (!started) {
-                    if (currentQuality && PROXY_POOL.length > 1 && streamRetryCount < PROXY_POOL.length) {
-                        streamRetryCount++;
-                        const nextProxy = getNextProxy();
-                        selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
-                        launchPlayer(selectedStreamUrl, true);
-                        return;
-                    }
-                    msg.innerHTML = 'Stream connection timeout. <button onclick="window.retryPlayer()" style="text-decoration:underline;color:#ef4444;">Tap to Retry</button>';
+                    msg.innerHTML = 'Stream failed to load. <button onclick="window.retryPlayer()" style="text-decoration:underline;color:#ef4444;">Tap to Retry</button>';
                     msg.style.display = "flex";
                     msg.classList.remove("hidden");
                 }
-            }, 10000);
-
-            if (hlsInstance) {
-                hlsInstance.destroy();
-                hlsInstance = null;
-            }
+            }, 15000);
 
             if (Hls.isSupported()) {
                 hlsInstance = new Hls({
                     enableWorker: true,
-                    xhrSetup: function(xhr) { 
-                        xhr.withCredentials = false; 
-                    },
-                    maxBufferLength: 15,            // Buffer max 15s ahead to save bandwidth
-                    maxMaxBufferLength: 30,
-                    liveSyncDurationCount: 3,       // Stay 3 fragments behind live edge smoothly
-                    liveMaxLatencyDurationCount: 6,
-                    maxBufferHole: 0.5
+                    xhrSetup: function(xhr) { xhr.withCredentials = false; }
                 });
                 hlsInstance.loadSource(url);
                 hlsInstance.attachMedia(video);
@@ -463,32 +425,7 @@
                     if (data.fatal) {
                         clearTimeout(loadTimeout);
                         if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            const status = data.response ? data.response.status : 0;
-                            // If proxy failed or rate-limited, rotate to next proxy if pool has alternatives
-                            if ((status === 0 || status === 429 || status >= 500) && PROXY_POOL.length > 1) {
-                                if (streamRetryCount < PROXY_POOL.length) {
-                                    streamRetryCount++;
-                                    const nextProxy = getNextProxy();
-                                    if (currentQuality) {
-                                        console.log("Proxy error (" + status + "), rotating to next proxy...");
-                                        selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
-                                        launchPlayer(selectedStreamUrl, true);
-                                        return;
-                                    }
-                                }
-                            }
-
-                            // Capped retry with backoff (prevents fast infinite loop)
-                            if (streamRetryCount < 2) {
-                                streamRetryCount++;
-                                streamRetryTimer = setTimeout(() => {
-                                    if (hlsInstance) hlsInstance.startLoad();
-                                }, 1500);
-                            } else {
-                                msg.innerHTML = 'Connection interrupted. <button onclick="window.retryPlayer()" style="text-decoration:underline;color:#ef4444;">Tap to Reconnect</button>';
-                                msg.style.display = "flex";
-                                msg.classList.remove("hidden");
-                            }
+                            hlsInstance.startLoad();
                         } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                             hlsInstance.recoverMediaError();
                         } else {
@@ -514,14 +451,7 @@
         }
 
         window.retryPlayer = function() {
-            streamRetryCount = 0;
-            const nextProxy = getNextProxy();
-            if (currentQuality) {
-                selectedStreamUrl = nextProxy + "?url=" + encodeURIComponent(currentQuality.url);
-                launchPlayer(selectedStreamUrl, true);
-            } else if (selectedStreamUrl) {
-                launchPlayer(selectedStreamUrl);
-            }
+            if (selectedStreamUrl) launchPlayer(selectedStreamUrl);
         };
 
         window.closePlayer = function() {
@@ -530,7 +460,6 @@
 
             video.pause();
             video.src = "";
-            clearTimeout(streamRetryTimer);
             if (hlsInstance) {
                 hlsInstance.destroy();
                 hlsInstance = null;
@@ -568,8 +497,7 @@
                             console.log("Matched quality:", q);
                             if (q) {
                                 currentQuality = q;
-                                const proxy = proxyEndpoint || PROXY_POOL[0];
-                                selectedStreamUrl = proxy + "?url=" + encodeURIComponent(q.url);
+                                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
                                 launchPlayer(selectedStreamUrl);
                                 return;
                             }
