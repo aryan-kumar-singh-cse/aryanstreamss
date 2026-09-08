@@ -93,7 +93,7 @@
 </head>
 <body>
     <div id="loading"><div class="spinner"></div></div>
-    <a href="/" id="back-btn">← Back</a>
+    <a href="index.html" id="back-btn">← Back</a>
 
     <div class="player-shell">
         <div id="video-area" class="video-area">
@@ -166,99 +166,49 @@
             return endpoint + "?url=" + encodeURIComponent(target);
         }
 
-        // Proxy pool - verified working Cloudflare Workers
-        const PROXY_POOL = [
-            "https://fcp1.abc-funs-official.workers.dev"
-        ];
-        var proxyIndex = Math.floor(Math.random() * PROXY_POOL.length);
-        var proxyEndpoint = PROXY_POOL[proxyIndex];
+        var proxyEndpoint = "/proxy";
+        streamUrl = rawUrl.startsWith("/proxy") ? rawUrl : proxyUrl(proxyEndpoint, rawUrl);
 
-        function getNextProxy() {
-            proxyIndex = (proxyIndex + 1) % PROXY_POOL.length;
-            proxyEndpoint = PROXY_POOL[proxyIndex];
-            return proxyEndpoint;
-        }
+        if (window.Hls && Hls.isSupported()) {
+            hlsInstance = new Hls({
+                enableWorker: true,
+                lowLatencyMode: true,
+                xhrSetup: function(xhr) { xhr.withCredentials = false; },
+                abrEwmaDefaultEstimate: 5000000,
+                maxBufferLength: 30,
+                maxMaxBufferLength: 60
+            });
+            hlsInstance.loadSource(streamUrl);
+            hlsInstance.attachMedia(video);
 
-        // --- HLS setup ---
-        video.muted = true;
-        var retryCount = 0;
-        var retryTimer = null;
-        streamUrl = (rawUrl.includes("workers.dev") || rawUrl.startsWith("/proxy"))
-            ? rawUrl
-            : proxyUrl(proxyEndpoint, rawUrl);
-
-        function startHls(currentStreamUrl, isFallback) {
-            clearTimeout(retryTimer);
-            if (!isFallback) retryCount = 0;
-
-            if (hlsInstance) {
-                hlsInstance.destroy();
-                hlsInstance = null;
-            }
-
-            if (window.Hls && Hls.isSupported()) {
-                hlsInstance = new Hls({
-                    enableWorker: true,
-                    xhrSetup: function(xhr) { xhr.withCredentials = false; },
-                    maxBufferLength: 15,
-                    maxMaxBufferLength: 30,
-                    liveSyncDurationCount: 3,
-                    liveMaxLatencyDurationCount: 6,
-                    maxBufferHole: 0.5
-                });
-                hlsInstance.loadSource(currentStreamUrl);
-                hlsInstance.attachMedia(video);
-
-                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
-                    hideLoading();
-                    buildQMenu(-1);
-                    video.play().catch(function(){});
-                });
-                hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
-                hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
-                    var errDetail = data.details || "";
-                    var status = (data.response && data.response.status) ? data.response.status : 0;
-                    console.error("HLS Error:", data);
-                    if (data.fatal) {
-                        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                            // If proxy failed (status 0, 429, or >= 500), rotate to next proxy if pool has more
-                            if ((status === 0 || status === 429 || status >= 500) && PROXY_POOL.length > 1) {
-                                if (retryCount < PROXY_POOL.length) {
-                                    retryCount++;
-                                    var nextEp = getNextProxy();
-                                    console.log("Proxy error (" + status + "), rotating to next proxy...");
-                                    startHls(proxyUrl(nextEp, rawUrl), true);
-                                    return;
-                                }
-                            }
-
-                            // Capped retry with backoff
-                            if (retryCount < 2) {
-                                retryCount++;
-                                showError("Reconnecting stream...");
-                                retryTimer = setTimeout(function() {
-                                    if (hlsInstance) hlsInstance.startLoad();
-                                }, 1500);
-                            } else {
-                                showError("Connection lost. Please refresh or tap back.");
-                            }
-                        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                            showError("Media error (" + errDetail + ") – recovering...");
-                            hlsInstance.recoverMediaError();
-                        } else {
-                            showError("Stream error. Please try another quality or refresh.");
-                        }
+            hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+                hideLoading();
+                buildQMenu(-1);
+                video.play().catch(function(){});
+            });
+            hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
+            hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
+                var errDetail = data.details || "";
+                var errStatus = (data.response && data.response.status) ? " Status: " + data.response.status : "";
+                console.error("HLS Error:", data);
+                if (data.fatal) {
+                    if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                        showError("Network error (" + errDetail + errStatus + ") – retrying...");
+                        hlsInstance.startLoad();
+                    } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                        showError("Media error (" + errDetail + ") – recovering...");
+                        hlsInstance.recoverMediaError();
+                    } else {
+                        showError("Stream failed (" + errDetail + errStatus + ")");
                     }
-                });
-            } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-                video.src = currentStreamUrl;
-                video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
-            } else {
-                hideLoading(); showError("HLS not supported.");
-            }
+                }
+            });
+        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            video.src = streamUrl;
+            video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
+        } else {
+            hideLoading(); showError("HLS not supported.");
         }
-
-        startHls(streamUrl);
 
         // --- Controls ---
         var playBtn = document.getElementById("play-btn");
