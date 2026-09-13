@@ -162,14 +162,19 @@
 
         if (!rawUrl) { hideLoading(); showError("No stream URL provided."); return; }
 
-        function proxyUrl(endpoint, target) {
-            return endpoint + "?url=" + encodeURIComponent(target);
-        }
+        streamUrl = rawUrl; // Direct stream like speedsters!
+        var isApple = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent) && !window.MSStream;
+        var isNativeHls = !!video.canPlayType("application/vnd.apple.mpegurl");
 
-        var proxyEndpoint = "/proxy";
-        streamUrl = rawUrl.startsWith("/proxy") ? rawUrl : proxyUrl(proxyEndpoint, rawUrl);
-
-        if (window.Hls && Hls.isSupported()) {
+        if (isApple && isNativeHls) {
+            // Direct playback on iOS / Safari with 0 proxy and 0 Cloudflare requests!
+            video.src = rawUrl;
+            video.addEventListener("loadedmetadata", function() {
+                hideLoading();
+                video.play().catch(function(){});
+                buildQMenu(-1);
+            });
+        } else if (window.Hls && Hls.isSupported()) {
             hlsInstance = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
@@ -203,8 +208,8 @@
                     }
                 }
             });
-        } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = streamUrl;
+        } else if (isNativeHls) {
+            video.src = rawUrl;
             video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
         } else {
             hideLoading(); showError("HLS not supported.");

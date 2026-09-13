@@ -196,7 +196,7 @@
         const API = "https://raw.githubusercontent.com/drmlive/fancode-live-events/main/fancode.json";
         const FALLBACK_IMG = "https://www.fancode.com/skillup-uploads/cms-media/Cricket_Fallback_Old_match-card.jpg";
         let allMatches = [], currentFilter = "ALL", currentMatch = null, currentQuality = null;
-        let selectedStreamUrl = "", hlsInstance = null;
+        let selectedStreamUrl = "", selectedRawUrl = "", hlsInstance = null;
 
         function esc(s) { return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
@@ -209,8 +209,6 @@
                 return true; 
             });
         }
-
-        const proxyEndpoint = "/proxy";
 
         function decodeHex(hex) {
             if (!hex) return "";
@@ -347,8 +345,8 @@
                 // Redirect directly for DRM protected streams
                 window.location.href = q.url;
             } else {
-                // Route stream through our Cloudflare Function CORS proxy
-                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
+                selectedRawUrl = q.url;
+                selectedStreamUrl = q.url; // Direct stream like speedsters!
                 showTelegramModal();
             }
         }
@@ -392,7 +390,31 @@
                 }
             }, 15000);
 
-            if (Hls.isSupported()) {
+            const isApple = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent) && !window.MSStream;
+            const isNativeHls = !!video.canPlayType("application/vnd.apple.mpegurl");
+
+            if (isApple && isNativeHls) {
+                // Play directly on iOS / Safari without proxy
+                const directUrl = selectedRawUrl || url;
+                video.src = directUrl;
+                video.addEventListener("loadedmetadata", function() {
+                    video.play().then(() => {
+                        started = true;
+                        clearTimeout(loadTimeout);
+                    }).catch(() => {
+                        // Autoplay blocked — show tap-to-play overlay
+                        started = true;
+                        clearTimeout(loadTimeout);
+                        msg.innerHTML = 'Tap anywhere to play';
+                        msg.style.display = "flex";
+                        msg.classList.remove("hidden");
+                        msg.onclick = function() {
+                            video.play();
+                            msg.classList.add("hidden");
+                        };
+                    });
+                }, { once: true });
+            } else if (Hls.isSupported()) {
                 hlsInstance = new Hls({
                     enableWorker: true,
                     xhrSetup: function(xhr) { xhr.withCredentials = false; }
@@ -435,14 +457,14 @@
                         }
                     }
                 });
-            } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+            } else if (isNativeHls) {
                 video.src = url;
                 video.addEventListener("loadedmetadata", function() {
                     video.play().then(() => {
                         started = true;
                         clearTimeout(loadTimeout);
                     }).catch(() => {});
-                });
+                }, { once: true });
             } else {
                 clearTimeout(loadTimeout);
                 msg.textContent = "Your browser does not support HLS streaming.";
@@ -497,7 +519,8 @@
                             console.log("Matched quality:", q);
                             if (q) {
                                 currentQuality = q;
-                                selectedStreamUrl = proxyEndpoint + "?url=" + encodeURIComponent(q.url);
+                                selectedRawUrl = q.url;
+                                selectedStreamUrl = q.url; // Direct stream like speedsters!
                                 launchPlayer(selectedStreamUrl);
                                 return;
                             }

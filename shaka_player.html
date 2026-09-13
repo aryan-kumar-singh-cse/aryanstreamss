@@ -82,31 +82,6 @@
             return;
         }
 
-        function proxyUrl(endpoint, target) {
-            return endpoint + "?url=" + encodeURIComponent(target);
-        }
-
-        async function pickProxyEndpoint() {
-            if (location.protocol === "file:") return "http://localhost:3000/proxy";
-
-            var candidates = [];
-            if (location.hostname === "localhost" || location.hostname === "127.0.0.1") {
-                candidates.push("http://localhost:3000/proxy");
-            }
-            if (location.pathname.indexOf("/fancode/") !== -1) {
-                candidates.push("/proxy", "/proxy", "/api/proxy");
-            } else {
-                candidates.push("/proxy", "/proxy", "/api/proxy");
-            }
-            for (var i = 0; i < candidates.length; i++) {
-                try {
-                    var res = await fetch(candidates[i], { method: "GET", cache: "no-store" });
-                    var text = await res.clone().text().catch(function(){ return ""; });
-                    if (res.status === 400 && /missing/i.test(text)) return candidates[i];
-                } catch (e) {}
-            }
-            return location.pathname.indexOf("/fancode/") !== -1 ? "/proxy" : "/proxy";
-        }
 
         shaka.polyfill.installAll();
         if (!shaka.Player.isBrowserSupported()) {
@@ -115,8 +90,7 @@
             return;
         }
 
-        pickProxyEndpoint().then(function(proxyEndpoint) {
-        MPD_URL = proxyUrl(proxyEndpoint, rawMpd);
+        MPD_URL = rawMpd; // Direct MPD stream like speedsters / diko8teen
 
         var player = new shaka.Player();
         player.attach($video).then(function() {
@@ -165,10 +139,6 @@
                 $video.muted = false;
                 document.removeEventListener('click', unmute);
             }, { once: true });
-        });
-        }).catch(function() {
-            hideLoading();
-            showError('Proxy route not available.');
         });
     })();
     </script>
