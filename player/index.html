@@ -163,25 +163,22 @@
         if (!rawUrl) { hideLoading(); showError("No stream URL provided."); return; }
 
         streamUrl = rawUrl; // Direct stream like speedsters!
-        var isApple = /iPad|iPhone|iPod|Macintosh/i.test(navigator.userAgent) && !window.MSStream;
         var isNativeHls = !!video.canPlayType("application/vnd.apple.mpegurl");
 
-        if (isApple && isNativeHls) {
-            // Direct playback on iOS / Safari with 0 proxy and 0 Cloudflare requests!
+        if (isNativeHls) {
+            // Direct playback with 0 proxy and 0 Cloudflare requests!
             video.src = rawUrl;
             video.addEventListener("loadedmetadata", function() {
                 hideLoading();
                 video.play().catch(function(){});
                 buildQMenu(-1);
-            });
+            }, { once: true });
         } else if (window.Hls && Hls.isSupported()) {
+            if (hlsInstance) { hlsInstance.destroy(); hlsInstance = null; }
             hlsInstance = new Hls({
                 enableWorker: true,
                 lowLatencyMode: true,
-                xhrSetup: function(xhr) { xhr.withCredentials = false; },
-                abrEwmaDefaultEstimate: 5000000,
-                maxBufferLength: 30,
-                maxMaxBufferLength: 60
+                xhrSetup: function(xhr) { xhr.withCredentials = false; }
             });
             hlsInstance.loadSource(streamUrl);
             hlsInstance.attachMedia(video);
@@ -193,24 +190,17 @@
             });
             hlsInstance.on(Hls.Events.LEVEL_SWITCHED, function(ev, data) { buildQMenu(data.level); });
             hlsInstance.on(Hls.Events.ERROR, function(ev, data) {
-                var errDetail = data.details || "";
-                var errStatus = (data.response && data.response.status) ? " Status: " + data.response.status : "";
-                console.error("HLS Error:", data);
                 if (data.fatal) {
                     if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                        showError("Network error (" + errDetail + errStatus + ") – retrying...");
                         hlsInstance.startLoad();
                     } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        showError("Media error (" + errDetail + ") – recovering...");
                         hlsInstance.recoverMediaError();
                     } else {
-                        showError("Stream failed (" + errDetail + errStatus + ")");
+                        hideLoading();
+                        showError("Stream error. Please reload or try another stream.");
                     }
                 }
             });
-        } else if (isNativeHls) {
-            video.src = rawUrl;
-            video.addEventListener("loadedmetadata", function() { hideLoading(); video.play().catch(function(){}); buildQMenu(-1); });
         } else {
             hideLoading(); showError("HLS not supported.");
         }
